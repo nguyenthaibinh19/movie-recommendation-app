@@ -1,56 +1,52 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-// ⭐ Flag: nếu muốn mỗi lần click phim sẽ gửi event lên BE để BE trả lại danh sách Top-K mới,
-// hãy bật true. MẶC ĐỊNH = false để KHÔNG auto-refresh top-K khi click.
+// ⭐ BỎ auto-refresh top-K khi click item (giữ false)
 const ENABLE_AUTO_EVENT = false;
 
 function RecommendForm() {
-  // Lantern panel state
-  const [lantern, setLantern] = useState(null); // { user_id, persona, top_genres, recent[], u_norm, ... }
+  // Lantern panel + picks
+  const [lantern, setLantern] = useState(null); // { persona, top_genres, recent[], u_norm, ... }
+  const [lanternPicks, setLanternPicks] = useState([]); // ⭐ gợi ý riêng theo Lantern
+  const [toast, setToast] = useState(null); // ⭐ thông báo nhỏ sau khi like
 
-  // Form state
-  const [gender, setGender] = useState('M');
-  const [age, setAge] = useState('');
-  const [occupation, setOccupation] = useState('');
+  // ⭐ Form state: mặc định Unknown
+  const [gender, setGender] = useState('UNKNOWN');
+  const [age, setAge] = useState(-1);
+  const [occupation, setOccupation] = useState(-1);
 
-  // Recommendations state
+  // Recommendations theo demographic (/recommend)
   const [recommendations, setRecommendations] = useState([]);
   const [error, setError] = useState(null);
-
-  // Nhớ lại input gần nhất để Refresh
-  const [lastQuery, setLastQuery] = useState(null); // { gender, age:Number, occupation:Number }
+  const [lastQuery, setLastQuery] = useState(null);
 
   // Modal Similar
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalBaseItem, setModalBaseItem] = useState(null); // { item_id, title }
-  const [modalSimilar, setModalSimilar] = useState([]);     // [{item_id,title,score,poster}]
+  const [modalBaseItem, setModalBaseItem] = useState(null);
+  const [modalSimilar, setModalSimilar] = useState([]);
   const [modalLoading, setModalLoading] = useState(false);
   const [modalError, setModalError] = useState('');
 
   // -------- Lantern helpers --------
   const fetchLanternProfile = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/lantern/profile', {
-        params: { user_id: 'guest' }
-      });
+      const res = await axios.get('http://localhost:5000/lantern/profile', { params: { user_id: 'guest' } });
       setLantern(res.data);
     } catch (e) {
       console.warn('[Lantern profile] fail:', e?.message);
     }
   };
 
-  const lanternRecommend = async () => {
+  const fetchLanternPicks = async () => {
     try {
       const res = await axios.post('http://localhost:5000/lantern/recommend', {
         user_id: 'guest',
+        exclude: [], // có thể thêm exclude nếu cần
       });
       const enriched = await enrichWithPosters(res.data.recommendations || []);
-      setRecommendations(enriched);
-      // Sau khi gợi ý theo gu, cũng cập nhật panel gu (phòng khi BE có thay đổi gì)
-      fetchLanternProfile();
+      setLanternPicks(enriched);
     } catch (e) {
-      console.warn('[Lantern recommend] fail:', e?.message);
+      console.warn('[Lantern picks] fail:', e?.message);
     }
   };
 
@@ -58,6 +54,9 @@ function RecommendForm() {
     try {
       await axios.post('http://localhost:5000/lantern/reset', { user_id: 'guest' });
       setLantern(null);
+      setLanternPicks([]);
+      setToast('Lantern reset ✓');
+      setTimeout(() => setToast(null), 1200);
     } catch (e) {
       console.warn('[Lantern reset] fail:', e?.message);
     }
@@ -68,10 +67,7 @@ function RecommendForm() {
     try {
       const cleanedTitle = title.replace(/\s*\(\d{4}\)$/, '');
       const res = await axios.get('https://api.themoviedb.org/3/search/movie', {
-        params: {
-          api_key: 'c24381c0a201e1fe30d94c02463bc6ca',
-          query: cleanedTitle
-        }
+        params: { api_key: 'c24381c0a201e1fe30d94c02463bc6ca', query: cleanedTitle }
       });
       const posterPath = res.data.results[0]?.poster_path;
       return posterPath ? `https://image.tmdb.org/t/p/w200${posterPath}` : null;
@@ -82,7 +78,6 @@ function RecommendForm() {
   };
 
   const enrichWithPosters = async (recs) => {
-    // recs có thể là [[item_id,title,score], ...] hoặc [{item_id,title,score}, ...]
     return Promise.all(
       recs.map(async (r) => {
         const [iid, ttl, sc] = Array.isArray(r) ? r : [r.item_id, r.title, r.score];
@@ -92,17 +87,19 @@ function RecommendForm() {
     );
   };
 
-  // -------- Submit form -> /recommend --------
+  // -------- Submit form -> /recommend (demographic) --------
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
       setError(null);
-      if (age === '' || occupation === '') {
-        setError('Please select both Age and Occupation.');
-        return;
-      }
 
-      const payload = { gender, age: Number(age), occupation: Number(occupation) };
+      // ⭐ Cho phép Unknown: nếu user không chọn gì, vẫn gửi lên để BE dùng default
+      const payload = {
+        gender,  // 'M' | 'F' | 'UNKNOWN'
+        age: Number(age),           // -1 = unknown
+        occupation: Number(occupation) // -1 = unknown
+      };
+
       setLastQuery(payload);
 
       const res = await axios.post('http://localhost:5000/recommend', payload);
@@ -115,15 +112,16 @@ function RecommendForm() {
       setModalSimilar([]);
       setModalError('');
 
-      // Cập nhật panel Lantern (để hiển thị khi vừa bắt đầu tương tác)
+      // Cập nhật Lantern panel + picks
       fetchLanternProfile();
+      fetchLanternPicks();
     } catch (err) {
       console.error('[❌ Network Error]:', err);
       setError('Something went wrong. Please try again.');
     }
   };
 
-  // -------- Refresh recommendations với lastQuery --------
+  // -------- Refresh demographic recommendations --------
   const handleRefreshRecommend = async () => {
     if (!lastQuery) return;
     try {
@@ -131,8 +129,8 @@ function RecommendForm() {
       const res = await axios.post('http://localhost:5000/recommend', lastQuery);
       const enriched = await enrichWithPosters(res.data.recommendations || []);
       setRecommendations(enriched);
-      // Không đụng modal
       fetchLanternProfile();
+      fetchLanternPicks();
     } catch (err) {
       console.error('[❌ Refresh Error]:', err);
       setError('Refresh failed. Please try again.');
@@ -143,36 +141,30 @@ function RecommendForm() {
   const sendEventIfEnabled = async (item_id, event = 'click') => {
     if (!ENABLE_AUTO_EVENT) return;
     try {
-      const res = await axios.post('http://localhost:5000/event', {
-        user_id: 'guest',
-        item_id,
-        event
-      });
-      if (Array.isArray(res.data?.recommendations)) {
-        const enriched = await enrichWithPosters(res.data.recommendations);
-        setRecommendations(enriched);
-      }
+      await axios.post('http://localhost:5000/event', { user_id: 'guest', item_id, event });
+      // ⭐ Không reset danh sách top-K chính
       fetchLanternProfile();
+      fetchLanternPicks();
     } catch (e) {
-      console.warn('[ℹ] Event not sent or BE no refresh:', e?.message);
+      console.warn('[ℹ] Event not sent:', e?.message);
     }
   };
 
-  // -------- Like button ở mỗi item --------
+  // -------- Like button ở mỗi item (chỉ ghi nhận) --------
   const handleLike = async (item_id) => {
     try {
-      const res = await axios.post('http://localhost:5000/event', {
+      await axios.post('http://localhost:5000/event', {
         user_id: 'guest',
         item_id,
         event: 'like',
       });
-      if (Array.isArray(res.data?.recommendations)) {
-        const enriched = await enrichWithPosters(res.data.recommendations);
-        setRecommendations(enriched);
-      }
+      // ⭐ Chỉ cập nhật Lantern insight + picks, KHÔNG reset top-K chính
       fetchLanternProfile();
+      fetchLanternPicks();
+      setToast('Liked ✓');
+      setTimeout(() => setToast(null), 1000);
     } catch (e) {
-      console.warn('[ℹ] Like failed or no refresh from BE:', e?.message);
+      console.warn('[ℹ] Like failed:', e?.message);
     }
   };
 
@@ -188,9 +180,7 @@ function RecommendForm() {
     try {
       await sendEventIfEnabled(item_id, 'click'); // chỉ chạy nếu ENABLE_AUTO_EVENT = true
 
-      const res = await axios.get('http://localhost:5000/similar_items', {
-        params: { item_id, k: 10 }
-      });
+      const res = await axios.get('http://localhost:5000/similar_items', { params: { item_id, k: 10 } });
       const raw = res.data.similar || [];
       const enriched = await enrichWithPosters(raw);
       setModalSimilar(enriched);
@@ -202,13 +192,23 @@ function RecommendForm() {
     }
   };
 
+  // 🔄 Load Lantern insight/picks ngay khi mở trang (trường hợp đã có session trước đó)
+  useEffect(() => {
+    fetchLanternProfile();
+    fetchLanternPicks();
+  }, []);
+
   return (
-    <div>
+    <div style={{ maxWidth: 980, margin: '0 auto' }}>
+      <h2 style={{ textAlign: 'center', margin: '16px 0' }}>🎬 Movie Recommender</h2>
+
       {/* --- FORM: nhập user-features --- */}
       <form onSubmit={handleSubmit}>
         <label>
           Gender:
+          {/* ⭐ Thêm Unknown (default) */}
           <select value={gender} onChange={(e) => setGender(e.target.value)}>
+            <option value="UNKNOWN">Unknown</option>
             <option value="M">Male</option>
             <option value="F">Female</option>
           </select>
@@ -217,7 +217,7 @@ function RecommendForm() {
 
         <label>Age:</label>
         <select value={age} onChange={(e) => setAge(Number(e.target.value))}>
-          <option value="">-- Select Age Group --</option>
+          <option value={-1}>Unknown</option>
           <option value={1}>Under 18</option>
           <option value={18}>18–24</option>
           <option value={25}>25–34</option>
@@ -230,7 +230,7 @@ function RecommendForm() {
 
         <label>Occupation:</label>
         <select value={occupation} onChange={(e) => setOccupation(Number(e.target.value))}>
-          <option value="">-- Select Occupation --</option>
+          <option value={-1}>Unknown</option>
           <option value={0}>Other / Not Specified</option>
           <option value={1}>Academic / Educator</option>
           <option value={2}>Artist</option>
@@ -256,7 +256,6 @@ function RecommendForm() {
         <br /><br />
 
         <button type="submit">Get Recommendations</button>
-
         <button
           type="button"
           onClick={handleRefreshRecommend}
@@ -270,10 +269,93 @@ function RecommendForm() {
 
       {error && <p style={{ color: 'red' }}>{error}</p>}
 
-      {/* --- DANH SÁCH TOP-K --- */}
+      {/* ⭐ Toast nhỏ khi like/reset */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 18, right: 18, background: '#222', color: '#fff',
+          padding: '8px 12px', borderRadius: 8, opacity: 0.9
+        }}>
+          {toast}
+        </div>
+      )}
+
+      {/* --- HÀNG 2: Lantern insight (bên trái) + Lantern Picks (bên phải) --- */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16, marginTop: 16 }}>
+        {/* Lantern insight */}
+        <div style={{ padding: 12, border: '1px solid #eee', borderRadius: 8 }}>
+          <h4 style={{ marginTop: 0 }}>Lantern insight</h4>
+          {lantern ? (
+            <>
+              <div>Persona: <b>{lantern.persona || '—'}</b>{typeof lantern.u_norm === 'number' && lantern.u_norm > 0 ? ` (‖u‖=${lantern.u_norm.toFixed(3)})` : ''}</div>
+              {Array.isArray(lantern.top_genres) && lantern.top_genres.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  Top genres: {lantern.top_genres.map(([g, c]) => `${g}(${c})`).join(', ')}
+                </div>
+              )}
+              {Array.isArray(lantern.recent) && lantern.recent.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  Recent likes/finishes: {lantern.recent.map(r => r.title).join(' · ')}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ color: '#666' }}>No taste data yet. Like some movies or press 🔮 to see Lantern work.</div>
+          )}
+
+          <div style={{ marginTop: 8 }}>
+            <button
+              onClick={() => { fetchLanternPicks(); fetchLanternProfile(); }}
+              style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ccc' }}
+              title="Recommend purely from your interactions"
+            >
+              🔮 Lantern recommend
+            </button>
+            <button
+              onClick={lanternReset}
+              style={{ marginLeft: 8, padding: '6px 10px', borderRadius: 6, border: '1px solid #ccc' }}
+              title="Clear your session taste"
+            >
+              🧹 Reset taste
+            </button>
+            <button
+              onClick={fetchLanternProfile}
+              style={{ marginLeft: 8, padding: '6px 10px', borderRadius: 6, border: '1px solid #ccc' }}
+              title="Refresh insight"
+            >
+              🔄 Refresh insight
+            </button>
+          </div>
+        </div>
+
+        {/* Lantern picks (gợi ý theo suy luận) */}
+        <div style={{ padding: 12, border: '1px solid #eee', borderRadius: 8 }}>
+          <h4 style={{ marginTop: 0 }}>Lantern Picks</h4>
+          {lanternPicks.length > 0 ? (
+            <ul style={{ marginTop: 8 }}>
+              {lanternPicks.map((item, i) => (
+                <li key={`lantern-${item.item_id}-${i}`} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', cursor: 'pointer' }} title="Click to see similar movies" onClick={() => openSimilarModal(item)}>
+                  {item.poster && <img src={item.poster} alt={item.title} style={{ width: 48, borderRadius: 6 }} />}
+                  <div><strong>{item.title}</strong> — {Number(item.score).toFixed(3)}</div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleLike(item.item_id); }}
+                    style={{ marginLeft: 'auto', padding: '2px 8px', borderRadius: 6, border: '1px solid #ccc', cursor: 'pointer' }}
+                    title="Like this movie"
+                  >
+                    ❤️ Like
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div style={{ color: '#666' }}>No Lantern picks yet — interact with some movies.</div>
+          )}
+        </div>
+      </div>
+
+      {/* --- DANH SÁCH TOP-K theo demographic --- */}
       {recommendations.length > 0 && (
-        <div>
-          <h3>Top Recommendations:</h3>
+        <div style={{ marginTop: 18 }}>
+          <h3>Top Recommendations (Demographic):</h3>
           <ul className="recommendation-list">
             {recommendations.map((item, idx) => {
               const { item_id, title, score, poster } = item;
@@ -303,52 +385,6 @@ function RecommendForm() {
           </ul>
         </div>
       )}
-
-      {/* --- LANTERN PANEL (gu của bạn) --- */}
-      <div style={{ marginTop: 16, padding: 12, border: '1px solid #eee', borderRadius: 8 }}>
-        <h4 style={{ marginTop: 0 }}>Your taste (Lantern)</h4>
-        {lantern ? (
-          <>
-            <div>Persona: <b>{lantern.persona || '—'}</b>{typeof lantern.u_norm === 'number' && lantern.u_norm > 0 ? ` (‖u‖=${lantern.u_norm.toFixed(3)})` : ''}</div>
-            {Array.isArray(lantern.top_genres) && lantern.top_genres.length > 0 && (
-              <div style={{ marginTop: 6 }}>
-                Top genres: {lantern.top_genres.map(([g, c]) => `${g}(${c})`).join(', ')}
-              </div>
-            )}
-            {Array.isArray(lantern.recent) && lantern.recent.length > 0 && (
-              <div style={{ marginTop: 6 }}>
-                Recent likes/finishes: {lantern.recent.map(r => r.title).join(' · ')}
-              </div>
-            )}
-          </>
-        ) : (
-          <div style={{ color: '#666' }}>No taste data yet. Interact with some movies or press “Get Recommendations”.</div>
-        )}
-
-        <div style={{ marginTop: 8 }}>
-          <button
-            onClick={lanternRecommend}
-            style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ccc' }}
-            title="Recommend purely from your interactions"
-          >
-            🔮 Recommend by my taste
-          </button>
-          <button
-            onClick={lanternReset}
-            style={{ marginLeft: 8, padding: '6px 10px', borderRadius: 6, border: '1px solid #ccc' }}
-            title="Clear your session taste"
-          >
-            🧹 Reset taste
-          </button>
-          <button
-            onClick={fetchLanternProfile}
-            style={{ marginLeft: 8, padding: '6px 10px', borderRadius: 6, border: '1px solid #ccc' }}
-            title="Refresh taste panel"
-          >
-            🔄 Refresh taste panel
-          </button>
-        </div>
-      </div>
 
       {/* --- MODAL: phim liên quan --- */}
       {modalOpen && (

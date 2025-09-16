@@ -4,7 +4,7 @@ from flask_cors import CORS
 import numpy as np  # <-- THÊM DÒNG NÀY
 
 from preprocess import encode_user_profile
-from predict_torch import recommend_movies  # PyTorch model
+from predict_torch import recommend_movies, recommend_popular
 
 app = Flask(__name__)
 CORS(app)
@@ -29,11 +29,18 @@ def recommend():
     try:
         raw_data = request.get_json()
         user_profile = encode_user_profile(raw_data)
-        recommendations = recommend_movies(user_profile)  # [[item_id, title, score], ...]
-        return jsonify({"recommendations": recommendations}), 200
+
+        # Nếu có UNKNOWN ở bất kỳ field -> dùng popular
+        if user_profile.get("use_popular", False):
+            recs = recommend_popular(top_n=10)
+            return jsonify({"recommendations": recs, "source": "popular"}), 200
+
+        recommendations = recommend_movies(user_profile)  # DeepFM
+        return jsonify({"recommendations": recommendations, "source": "model"}), 200
     except Exception as e:
         print("[❌ /recommend]", e)
         return jsonify({"error": str(e)}), 400
+
 
 @app.route("/similar_items", methods=["GET"])
 def similar_items():
@@ -93,10 +100,14 @@ def lantern_recommend():
 
         sim = _sim_mod()
         u = sim.SESSION_U.get(user_id)
-        if u is None:
-            # Chưa có hành vi -> fallback: dùng /recommend cũ với default hoặc báo thiếu signal
-            return jsonify({"recommendations": [], "note": "No session vector yet. Interact more items."}), 200
 
+        # Nếu chưa có u hoặc tín hiệu còn yếu -> popular
+        TAU = 0.2
+        if u is None or float(np.linalg.norm(u)) < TAU:
+            recs = recommend_popular(top_n=10, exclude=exclude)
+            return jsonify({"recommendations": recs, "note": "popular_fallback"}), 200
+
+        # Tín hiệu đủ mạnh -> Lantern thuần
         recs = sim.recommend_by_u(u, top_k=10, exclude=exclude)
         return jsonify({"recommendations": recs}), 200
     except Exception as e:

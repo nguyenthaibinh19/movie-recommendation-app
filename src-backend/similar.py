@@ -92,20 +92,36 @@ def _load_titles_from_movies_dat():
 
 def init_similar():
     global ITEM_EMB, INDEX, ITEM_ID_TO_INDEX, INDEX_TO_ITEM_ID
-    ITEM_EMB = np.load(ITEM_EMB_PATH).astype("float32")
+    # 1) mmap để giảm thời gian load ban đầu
+    ITEM_EMB = np.load(ITEM_EMB_PATH, mmap_mode="r").astype("float32")
+
     with open(ID2IDX_PATH, "r", encoding="utf-8") as f:
         ITEM_ID_TO_INDEX = {str(k): int(v) for k, v in json.load(f).items()}
     with open(IDX2ID_PATH, "r", encoding="utf-8") as f:
         INDEX_TO_ITEM_ID = {str(k): str(v) for k, v in json.load(f).items()}
 
-    em = ITEM_EMB.copy()
+    # 2) Chỉ normalize bản copy khi search, không cần normalize toàn bộ ngay lập tức
+    dim = ITEM_EMB.shape[1]
+    index = faiss.IndexFlatIP(dim)
+    # FAISS cần vector đã L2-normalize để cosine = inner product
+    # Nhưng ta có thể normalize "khi query" (q) và nạp "bản chuẩn hoá" của ITEM_EMB một lần nhẹ sau.
+    em = np.array(ITEM_EMB)  # vẫn là view mmap, không copy toàn bộ vào RAM
     faiss.normalize_L2(em)
-    index = faiss.IndexFlatIP(em.shape[1])
     index.add(em)
     INDEX = index
 
     _load_titles_from_movies_dat()
     return True
+
+_ITEMS_NORMED = None
+def _ensure_items_normed():
+    global _ITEMS_NORMED
+    if _ITEMS_NORMED is None:
+        E = np.array(ITEM_EMB)
+        norms = np.linalg.norm(E, axis=1, keepdims=True) + 1e-12
+        _ITEMS_NORMED = E / norms
+    return _ITEMS_NORMED
+
 
 def similar_items_by_item_id(item_id: int | str, k: int = 10):
     raw = str(item_id)
