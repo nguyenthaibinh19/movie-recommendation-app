@@ -3,8 +3,11 @@ import os, json
 import numpy as np
 import faiss
 import pandas as pd
-import os, json, numpy as np, faiss, pandas as pd
+from collections import defaultdict, deque
+import time
 
+USER_STATE = {}  # user_id -> dict(u, history, genre_counts, last_ts)
+GENRES_BY_ID = {}
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJ_ROOT = os.path.normpath(os.path.join(ROOT_DIR, ".."))
 DATA_DIR = os.path.join(PROJ_ROOT, "Data")
@@ -21,8 +24,60 @@ ITEM_ID_TO_INDEX = None
 INDEX_TO_ITEM_ID = None
 TITLE_BY_ID = {}
 
+
+def _parse_genres_of(iid_str: str):
+    # Đọc từ MOVIES_DAT đã load (TITLE_BY_ID hiện có; ta cần thêm GENRES_BY_ID)
+    # Hãy tạo GENRES_BY_ID khi _load_titles_from_movies_dat() chạy:
+    return GENRES_BY_ID.get(iid_str, "")
+
+def update_user_profile(user_id: str, item_id: int, ev: str):
+    """
+    Ghi lại lịch sử & cập nhật đếm thể loại để tóm tắt gu.
+    Không thay thế online_update_u (u-vector), mà bổ sung metadata cho Lantern.
+    """
+    st = USER_STATE.get(user_id)
+    if st is None:
+        st = {
+            "history": deque(maxlen=200),          # (ts, item_id, ev, title)
+            "genre_counts": defaultdict(int),      # genre_name -> count
+            "last_ts": 0
+        }
+        USER_STATE[user_id] = st
+
+    ts = int(time.time())
+    iid = str(item_id)
+    title = TITLE_BY_ID.get(iid, iid)
+    st["history"].append((ts, int(item_id), ev, title))
+    st["last_ts"] = ts
+
+    # Với sự kiện tích cực mới đếm thể loại (like/finish/click)
+    if ev in ("like", "finish", "click"):
+        genres = _parse_genres_of(iid)  # ví dụ: "Action|Adventure|Sci-Fi"
+        if isinstance(genres, str) and genres:
+            for g in genres.split("|"):
+                st["genre_counts"][g] += 1
+
+def summarize_user(user_id: str, top_k_genres: int = 5, top_k_recent: int = 5):
+    st = USER_STATE.get(user_id, {"history":[], "genre_counts":{}})
+    # Top genres
+    gc = st.get("genre_counts", {})
+    top_genres = sorted(gc.items(), key=lambda x: -x[1])[:top_k_genres]
+
+    # Recent positives (like/finish trước, rồi click)
+    hist = list(st.get("history", []))
+    pos = [h for h in reversed(hist) if h[2] in ("finish", "like")]  # ưu tiên finish/like
+    if len(pos) < top_k_recent:
+        pos += [h for h in reversed(hist) if h[2] == "click"]
+    pos = pos[:top_k_recent]
+
+    # Persona gợi ý đơn giản = top-1 genre (hoặc top-2)
+    persona = " · ".join([g for g,_ in top_genres[:2]]) if top_genres else "Unknown"
+
+    recent_titles = [{"ts": h[0], "item_id": h[1], "event": h[2], "title": h[3]} for h in pos]
+    return {"persona": persona, "top_genres": top_genres, "recent": recent_titles}
+
 def _load_titles_from_movies_dat():
-    global TITLE_BY_ID
+    global TITLE_BY_ID, GENRES_BY_ID
     if not os.path.exists(MOVIES_DAT): return
     rows = []
     with open(MOVIES_DAT, "r", encoding="latin-1") as f:
@@ -33,6 +88,7 @@ def _load_titles_from_movies_dat():
     if rows:
         df = pd.DataFrame(rows, columns=["movieId","title","genres"])
         TITLE_BY_ID = dict(zip(df["movieId"].astype(str), df["title"]))
+        GENRES_BY_ID = dict(zip(df["movieId"].astype(str), df["genres"]))
 
 def init_similar():
     global ITEM_EMB, INDEX, ITEM_ID_TO_INDEX, INDEX_TO_ITEM_ID

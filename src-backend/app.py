@@ -1,48 +1,51 @@
 # src-backend/app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import numpy as np  # <-- THÊM DÒNG NÀY
 
 from preprocess import encode_user_profile
-from predict_torch import recommend_movies  # <— dùng PyTorch thay TF
-
-# (Sau khi chạy xong Similar ở bước 4–5, bạn import thêm 2 dòng dưới)
-from similar import init_similar, similar_items_by_item_id, online_update_u, recommend_by_u
+from predict_torch import recommend_movies  # PyTorch model
 
 app = Flask(__name__)
 CORS(app)
 
-# (Sau bước 5 mới bật init Similar)
-try:
-    init_similar()
-    print("[✅ Similar] FAISS index ready")
-except Exception as e:
-    print("[⚠️ Similar init failed]", e)
+# ---- Lazy import FAISS-based 'similar' only when needed ----
+_sim = None
+def _sim_mod():
+    global _sim
+    if _sim is None:
+        import similar as _S  # import sau khi ENV đã được set từ run.py
+        try:
+            _S.init_similar()
+            print("[✅ Similar] index ready")
+        except Exception as e:
+            print("[⚠️ Similar init failed]", e)
+        _sim = _S
+    return _sim
+# ------------------------------------------------------------
 
 @app.route("/recommend", methods=["POST"])
 def recommend():
     try:
         raw_data = request.get_json()
         user_profile = encode_user_profile(raw_data)
-        print("[🐾 Encoded user profile]:", user_profile)
         recommendations = recommend_movies(user_profile)  # [[item_id, title, score], ...]
-        print("[🎬 Top recommendations]:", recommendations[:3])
         return jsonify({"recommendations": recommendations}), 200
     except Exception as e:
-        print("[❌ Backend error]:", e)
+        print("[❌ /recommend]", e)
         return jsonify({"error": str(e)}), 400
 
-# (Bật 2 endpoint sau khi tạo similar.py)
 @app.route("/similar_items", methods=["GET"])
 def similar_items():
     try:
         item_id = request.args.get("item_id", type=int)
         k = request.args.get("k", default=10, type=int)
-        sims = similar_items_by_item_id(item_id, k=k)
+        sim = _sim_mod()
+        sims = sim.similar_items_by_item_id(item_id, k=k)
         return jsonify({"item_id": item_id, "similar": sims}), 200
     except Exception as e:
         print("[❌ /similar_items]", e)
         return jsonify({"error": str(e)}), 400
-
 
 @app.route("/event", methods=["POST"])
 def event():
@@ -52,18 +55,70 @@ def event():
         item_id = int(data["item_id"])
         ev = data.get("event", "click")
 
-        # mapping event -> (label, weight)
         y, w = (1, 0.5)
         if ev == "like":    y, w = 1, 1.0
         if ev == "finish":  y, w = 1, 1.2
         if ev == "dismiss": y, w = 0, 0.3
 
-        u = online_update_u(user_id, item_id, y=y, w=w)
-        recs = recommend_by_u(u, top_k=10, exclude=[item_id])
+        sim = _sim_mod()
+        sim.update_user_profile(user_id, item_id, ev)
+        # cập nhật u-vector nhanh (đã có sẵn)
+        u = sim.online_update_u(user_id, item_id, y=y, w=w)
+        recs = sim.recommend_by_u(u, top_k=10, exclude=[item_id])
         return jsonify({"ok": True, "recommendations": recs}), 200
     except Exception as e:
         print("[❌ /event]", e)
         return jsonify({"error": str(e)}), 400
 
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0")
+@app.route("/lantern/profile", methods=["GET"])
+def lantern_profile():
+    try:
+        user_id = request.args.get("user_id", default="guest", type=str)
+        sim = _sim_mod()
+        summary = sim.summarize_user(user_id, top_k_genres=5, top_k_recent=6)
+        # (tùy chọn) trả thêm norm(u) để biết đã học đủ chưa
+        u = sim.SESSION_U.get(user_id)
+        u_norm = float(np.linalg.norm(u)) if u is not None else 0.0
+        return jsonify({"user_id": user_id, "u_norm": u_norm, **summary}), 200
+    except Exception as e:
+        print("[❌ /lantern/profile]", e)
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/lantern/recommend", methods=["POST"])
+def lantern_recommend():
+    try:
+        data = request.get_json(force=True) or {}
+        user_id = str(data.get("user_id", "guest"))
+        exclude = data.get("exclude", [])  # danh sách item_id muốn loại
+
+        sim = _sim_mod()
+        u = sim.SESSION_U.get(user_id)
+        if u is None:
+            # Chưa có hành vi -> fallback: dùng /recommend cũ với default hoặc báo thiếu signal
+            return jsonify({"recommendations": [], "note": "No session vector yet. Interact more items."}), 200
+
+        recs = sim.recommend_by_u(u, top_k=10, exclude=exclude)
+        return jsonify({"recommendations": recs}), 200
+    except Exception as e:
+        print("[❌ /lantern/recommend]", e)
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/lantern/reset", methods=["POST"])
+def lantern_reset():
+    try:
+        data = request.get_json(force=True) or {}
+        user_id = str(data.get("user_id", "guest"))
+        sim = _sim_mod()
+        # reset u
+        if user_id in sim.SESSION_U:
+            del sim.SESSION_U[user_id]
+        # reset state
+        if user_id in sim.USER_STATE:
+            del sim.USER_STATE[user_id]
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        print("[❌ /lantern/reset]", e)
+        return jsonify({"error": str(e)}), 400
+
+
+# KHÔNG có if __name__ == "__main__" ở đây. Dùng run.py để chạy.

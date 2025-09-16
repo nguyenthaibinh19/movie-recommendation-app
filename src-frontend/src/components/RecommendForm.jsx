@@ -6,10 +6,15 @@ import axios from 'axios';
 const ENABLE_AUTO_EVENT = false;
 
 function RecommendForm() {
+  // Lantern panel state
+  const [lantern, setLantern] = useState(null); // { user_id, persona, top_genres, recent[], u_norm, ... }
+
+  // Form state
   const [gender, setGender] = useState('M');
   const [age, setAge] = useState('');
   const [occupation, setOccupation] = useState('');
 
+  // Recommendations state
   const [recommendations, setRecommendations] = useState([]);
   const [error, setError] = useState(null);
 
@@ -23,7 +28,42 @@ function RecommendForm() {
   const [modalLoading, setModalLoading] = useState(false);
   const [modalError, setModalError] = useState('');
 
-  // -------- Helpers --------
+  // -------- Lantern helpers --------
+  const fetchLanternProfile = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/lantern/profile', {
+        params: { user_id: 'guest' }
+      });
+      setLantern(res.data);
+    } catch (e) {
+      console.warn('[Lantern profile] fail:', e?.message);
+    }
+  };
+
+  const lanternRecommend = async () => {
+    try {
+      const res = await axios.post('http://localhost:5000/lantern/recommend', {
+        user_id: 'guest',
+      });
+      const enriched = await enrichWithPosters(res.data.recommendations || []);
+      setRecommendations(enriched);
+      // Sau khi gợi ý theo gu, cũng cập nhật panel gu (phòng khi BE có thay đổi gì)
+      fetchLanternProfile();
+    } catch (e) {
+      console.warn('[Lantern recommend] fail:', e?.message);
+    }
+  };
+
+  const lanternReset = async () => {
+    try {
+      await axios.post('http://localhost:5000/lantern/reset', { user_id: 'guest' });
+      setLantern(null);
+    } catch (e) {
+      console.warn('[Lantern reset] fail:', e?.message);
+    }
+  };
+
+  // -------- Poster helpers --------
   const getPosterURL = async (title) => {
     try {
       const cleanedTitle = title.replace(/\s*\(\d{4}\)$/, '');
@@ -74,6 +114,9 @@ function RecommendForm() {
       setModalBaseItem(null);
       setModalSimilar([]);
       setModalError('');
+
+      // Cập nhật panel Lantern (để hiển thị khi vừa bắt đầu tương tác)
+      fetchLanternProfile();
     } catch (err) {
       console.error('[❌ Network Error]:', err);
       setError('Something went wrong. Please try again.');
@@ -89,6 +132,7 @@ function RecommendForm() {
       const enriched = await enrichWithPosters(res.data.recommendations || []);
       setRecommendations(enriched);
       // Không đụng modal
+      fetchLanternProfile();
     } catch (err) {
       console.error('[❌ Refresh Error]:', err);
       setError('Refresh failed. Please try again.');
@@ -108,6 +152,7 @@ function RecommendForm() {
         const enriched = await enrichWithPosters(res.data.recommendations);
         setRecommendations(enriched);
       }
+      fetchLanternProfile();
     } catch (e) {
       console.warn('[ℹ] Event not sent or BE no refresh:', e?.message);
     }
@@ -125,6 +170,7 @@ function RecommendForm() {
         const enriched = await enrichWithPosters(res.data.recommendations);
         setRecommendations(enriched);
       }
+      fetchLanternProfile();
     } catch (e) {
       console.warn('[ℹ] Like failed or no refresh from BE:', e?.message);
     }
@@ -257,6 +303,52 @@ function RecommendForm() {
           </ul>
         </div>
       )}
+
+      {/* --- LANTERN PANEL (gu của bạn) --- */}
+      <div style={{ marginTop: 16, padding: 12, border: '1px solid #eee', borderRadius: 8 }}>
+        <h4 style={{ marginTop: 0 }}>Your taste (Lantern)</h4>
+        {lantern ? (
+          <>
+            <div>Persona: <b>{lantern.persona || '—'}</b>{typeof lantern.u_norm === 'number' && lantern.u_norm > 0 ? ` (‖u‖=${lantern.u_norm.toFixed(3)})` : ''}</div>
+            {Array.isArray(lantern.top_genres) && lantern.top_genres.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                Top genres: {lantern.top_genres.map(([g, c]) => `${g}(${c})`).join(', ')}
+              </div>
+            )}
+            {Array.isArray(lantern.recent) && lantern.recent.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                Recent likes/finishes: {lantern.recent.map(r => r.title).join(' · ')}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ color: '#666' }}>No taste data yet. Interact with some movies or press “Get Recommendations”.</div>
+        )}
+
+        <div style={{ marginTop: 8 }}>
+          <button
+            onClick={lanternRecommend}
+            style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ccc' }}
+            title="Recommend purely from your interactions"
+          >
+            🔮 Recommend by my taste
+          </button>
+          <button
+            onClick={lanternReset}
+            style={{ marginLeft: 8, padding: '6px 10px', borderRadius: 6, border: '1px solid #ccc' }}
+            title="Clear your session taste"
+          >
+            🧹 Reset taste
+          </button>
+          <button
+            onClick={fetchLanternProfile}
+            style={{ marginLeft: 8, padding: '6px 10px', borderRadius: 6, border: '1px solid #ccc' }}
+            title="Refresh taste panel"
+          >
+            🔄 Refresh taste panel
+          </button>
+        </div>
+      </div>
 
       {/* --- MODAL: phim liên quan --- */}
       {modalOpen && (
