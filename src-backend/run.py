@@ -6,7 +6,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("MKL_SERVICE_FORCE_INTEL", "1")
 # Nếu còn lỗi libiomp5md.dll ở môi trường dev, có thể bật dòng dưới (không khuyến nghị cho prod)
-# os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 t0 = time.perf_counter()
 print("[run] starting…")
