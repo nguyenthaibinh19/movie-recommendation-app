@@ -11,7 +11,7 @@ item_map_df = pd.read_csv('Data/item_id_mapping.csv')
 item_id_to_index = dict(zip(item_map_df["item_id"], item_map_df["index"]))
 
 # Load danh sách phim
-movies_df = pd.read_csv('Data/Dataset/movies.dat', sep='::', engine='python',
+movies_df = pd.read_csv('Data/Dataset/ml-1m/movies.dat', sep='::', engine='python',
                         names=["item_id", "title", "genres"], encoding='latin-1')
 movies_df["genre"] = movies_df["genres"].apply(lambda x: x.split("|")[0])
 genre_to_index = {genre: idx for idx, genre in enumerate(sorted(movies_df["genre"].unique()))}
