@@ -1,1 +1,7 @@
-(bash)./run-all.sh
+Run backend
+cd src-backend
+python run.py
+
+Run frontend
+npm install
+npm start
