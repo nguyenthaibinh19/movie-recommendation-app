@@ -124,6 +124,8 @@ def _ensure_items_normed():
 
 
 def similar_items_by_item_id(item_id: int | str, k: int = 10):
+    if not 1 <= k <= 100:
+        raise ValueError('k must be between 1 and 100')
     raw = str(item_id)
     if raw not in ITEM_ID_TO_INDEX:
         raise ValueError(f"Unknown item_id: {item_id}")
@@ -184,15 +186,11 @@ def recommend_by_u(u_vec: np.ndarray, top_k: int = 10, exclude: list[int] | None
     uv = u_vec / (np.linalg.norm(u_vec) + 1e-12)
     scores = E @ uv  # cosine
 
-    if exclude:
-        for iid in exclude:
-            idx = ITEM_ID_TO_INDEX.get(str(iid))
-            if idx is not None:
-                scores[idx] = -1e9
-
-    k = min(top_k, scores.shape[0] - 1 if exclude else top_k)
-    idxs = np.argpartition(-scores, k)[:k]
-    idxs = idxs[np.argsort(-scores[idxs])]
+    excluded = {ITEM_ID_TO_INDEX[str(iid)] for iid in (exclude or [])
+                if str(iid) in ITEM_ID_TO_INDEX}
+    candidates = np.array([i for i in range(len(scores)) if i not in excluded], dtype=int)
+    k = min(max(top_k, 0), len(candidates))
+    idxs = candidates[np.argsort(-scores[candidates], kind='stable')[:k]]
     out = []
     for i in idxs:
         iid = INDEX_TO_ITEM_ID.get(str(int(i)), str(int(i)))

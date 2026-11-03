@@ -1,13 +1,89 @@
+:root {
+  --surface: #090b10;
+  --panel: #151820;
+  --panel-hover: #20242f;
+  --ink: #f5f6f8;
+  --muted: #a1a8b6;
+  --line: #ffffff16;
+  --accent: #79adff;
+  --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 90px;
+}
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
-
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+button,
+input,
+select {
+  font: inherit;
+}
+button,
+a,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+button {
+  cursor: pointer;
+  color: inherit;
+  border: 0;
+  background: none;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 5px;
+}
+::selection {
+  background: #3363a8;
+}
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+svg {
+  flex-shrink: 0;
+}
+button,
+a {
+  touch-action: manipulation;
+}
+#discover,
+#preferences,
+#how-it-works {
+  scroll-margin-top: 90px;
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }

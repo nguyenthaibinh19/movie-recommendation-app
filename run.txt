@@ -1,7 +1,12 @@
-Run backend
-cd src-backend
-python run.py
+See README.md for setup and troubleshooting.
 
-Run frontend
-npm install
+Run both services from the project root:
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+
+Run backend separately:
+.\.venv\Scripts\python.exe src-backend/run.py
+
+Run frontend separately:
+cd src-frontend
+npm ci
 npm start

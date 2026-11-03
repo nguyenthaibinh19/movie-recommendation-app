@@ -1,0 +1,29 @@
+{
+  "items": 3883,
+  "embedding_dimensions": 16,
+  "checkpoint_parameters": 85516,
+  "retrieval_embeddings_match_checkpoint": true,
+  "popular_items": 2000,
+  "files": {
+    "deepfm_pytorch.pth": {
+      "bytes": 347762,
+      "sha256": "a2d10e788229610744f381e40e47337bc975c2dac567055f4c1a0bec7a9ca4c7"
+    },
+    "item_emb.npy": {
+      "bytes": 248640,
+      "sha256": "825f2348e0de83f653595078dfc86e1f78fb928017b72e02157455c9df8061ff"
+    },
+    "item_id_to_index.json": {
+      "bytes": 52158,
+      "sha256": "b9729c521713aa1e6b250607433265373934a044cc64be22f66fcec290330c02"
+    },
+    "index_to_item_id.json": {
+      "bytes": 52158,
+      "sha256": "8e99ce9e69c5680e26d5cb9666ae62040cceb7cfe47bb8fb2b2a1d2e2c3b7617"
+    },
+    "popular_items.json": {
+      "bytes": 11457,
+      "sha256": "eddb926f5ece2f3f17a83673ee8a047a9d31bad0905b4b2fb8f4018ecacaa710"
+    }
+  }
+}

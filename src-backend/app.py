@@ -15,14 +15,14 @@ def _sim_mod():
     global _sim
     if _sim is None:
         import similar as _S  # import sau khi ENV đã được set từ run.py
-        try:
-            _S.init_similar()
-            print("[✅ Similar] index ready")
-        except Exception as e:
-            print("[⚠️ Similar init failed]", e)
+        _S.init_similar()
         _sim = _S
     return _sim
 # ------------------------------------------------------------
+
+@app.get('/health')
+def health():
+    return jsonify({'status': 'ok'})
 
 @app.route("/recommend", methods=["POST"])
 def recommend():
@@ -61,6 +61,8 @@ def event():
         user_id = str(data.get("user_id", "guest"))
         item_id = int(data["item_id"])
         ev = data.get("event", "click")
+        if ev not in ('click', 'like', 'finish', 'dismiss'):
+            raise ValueError('event must be click, like, finish or dismiss')
 
         y, w = (1, 0.5)
         if ev == "like":    y, w = 1, 1.0
@@ -68,6 +70,8 @@ def event():
         if ev == "dismiss": y, w = 0, 0.3
 
         sim = _sim_mod()
+        if str(item_id) not in sim.ITEM_ID_TO_INDEX:
+            raise ValueError(f'Unknown item_id: {item_id}')
         sim.update_user_profile(user_id, item_id, ev)
         # cập nhật u-vector nhanh (đã có sẵn)
         u = sim.online_update_u(user_id, item_id, y=y, w=w)
